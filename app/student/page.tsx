@@ -186,8 +186,8 @@ export default async function StudentDashboard() {
             <a href="/student" className="nav-a active">
               <span className="nav-ic">◈</span> My Skills
             </a>
-            <a href="/student/progress" className="nav-a">
-              <span className="nav-ic">◉</span> My Progress
+            <a href="/student/quiz" className="nav-a">
+              <span className="nav-ic">◉</span> My Quiz
             </a>
           </nav>
           <div className="sb-bottom">

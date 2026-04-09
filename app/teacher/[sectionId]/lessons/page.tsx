@@ -1,11 +1,10 @@
 'use client'
 
-import { useEffect, useState } from 'react'
+import { useEffect, useState, useRef } from 'react'
 import { createClient } from '@/lib/client'
 import { useParams } from 'next/navigation'
 
 // ── Types ──────────────────────────────────────────────────────────────────
-type Skill = { id: string; name: string; subject: string; order_index: number }
 type Lesson = {
   id: string
   title: string
@@ -27,6 +26,14 @@ type Question = {
   correct_index: number
   status: 'pending' | 'approved' | 'rejected'
 }
+type FileAttachment = {
+  name: string
+  type: 'pdf' | 'image' | 'docx' | 'txt'
+  mimeType: string
+  // for pdf/image: base64 string; for docx/txt: extracted text string
+  data: string
+  isBase64: boolean
+}
 
 const SUBJECTS = ['English', 'Mathematics', 'Science']
 const DIFF_ORDER: Array<'basic' | 'standard' | 'advanced'> = ['basic', 'standard', 'advanced']
@@ -39,10 +46,26 @@ const SUBJ_COLORS: Record<string, { accent: string; light: string; icon: string 
   Science:     { accent: '#c9941a', light: 'rgba(201,148,26,0.08)', icon: '⚗'  },
 }
 
+const ACCEPTED_TYPES: Record<string, FileAttachment['type']> = {
+  'application/pdf': 'pdf',
+  'image/jpeg': 'image',
+  'image/jpg': 'image',
+  'image/png': 'image',
+  'image/gif': 'image',
+  'image/webp': 'image',
+  'application/vnd.openxmlformats-officedocument.wordprocessingml.document': 'docx',
+  'text/plain': 'txt',
+}
+
+const FILE_ICON: Record<FileAttachment['type'], string> = {
+  pdf: '📄', image: '🖼', docx: '📝', txt: '📃',
+}
+
 // ── Component ──────────────────────────────────────────────────────────────
 export default function LessonsPage() {
   const { sectionId } = useParams<{ sectionId: string }>()
   const supabase = createClient()
+  const fileInputRef = useRef<HTMLInputElement>(null)
 
   // data
   const [lessons,   setLessons]   = useState<Lesson[]>([])
@@ -53,6 +76,7 @@ export default function LessonsPage() {
   const [expandedLesson, setExpandedLesson] = useState<string | null>(null)
   const [showForm,       setShowForm]       = useState(false)
   const [formStep,       setFormStep]       = useState<'details' | 'review'>('details')
+  const [dragOver,       setDragOver]       = useState(false)
 
   // form fields
   const [subject,      setSubject]      = useState('English')
@@ -63,13 +87,18 @@ export default function LessonsPage() {
   const [countStd,     setCountStd]     = useState(5)
   const [countAdv,     setCountAdv]     = useState(5)
 
+  // file attachment
+  const [attachment,     setAttachment]     = useState<FileAttachment | null>(null)
+  const [fileProcessing, setFileProcessing] = useState(false)
+  const [fileError,      setFileError]      = useState('')
+
   // generation state
-  const [generating,    setGenerating]    = useState(false)
-  const [genError,      setGenError]      = useState('')
-  const [newLessonId,   setNewLessonId]   = useState<string | null>(null)
-  const [pendingQs,     setPendingQs]     = useState<Question[]>([])
-  const [selected,      setSelected]      = useState<Record<string, boolean>>({})
-  const [saving,        setSaving]        = useState(false)
+  const [generating,  setGenerating]  = useState(false)
+  const [genError,    setGenError]    = useState('')
+  const [pendingQs,   setPendingQs]   = useState<Question[]>([])
+  const [selected,    setSelected]    = useState<Record<string, boolean>>({})
+  const [saving,      setSaving]      = useState(false)
+  const [deletingId,  setDeletingId]  = useState<string | null>(null)
 
   useEffect(() => { loadData() }, [sectionId])
 
@@ -93,21 +122,104 @@ export default function LessonsPage() {
     setLoading(false)
   }
 
+  // ── File processing ────────────────────────────────────────────────────
+  async function processFile(file: File) {
+    setFileError('')
+    setFileProcessing(true)
+    setAttachment(null)
+
+    const mimeType = file.type
+    const fileType = ACCEPTED_TYPES[mimeType]
+
+    if (!fileType) {
+      setFileError('Unsupported file type. Please upload a PDF, Word (.docx), image, or plain text file.')
+      setFileProcessing(false)
+      return
+    }
+
+    try {
+      if (fileType === 'pdf' || fileType === 'image') {
+        // Read as base64
+        const base64 = await new Promise<string>((resolve, reject) => {
+          const reader = new FileReader()
+          reader.onload = () => {
+            const result = reader.result as string
+            // strip data URL prefix → get raw base64
+            resolve(result.split(',')[1])
+          }
+          reader.onerror = reject
+          reader.readAsDataURL(file)
+        })
+        setAttachment({ name: file.name, type: fileType, mimeType, data: base64, isBase64: true })
+
+      } else if (fileType === 'txt') {
+        const text = await file.text()
+        setAttachment({ name: file.name, type: 'txt', mimeType: 'text/plain', data: text, isBase64: false })
+
+      } else if (fileType === 'docx') {
+        // Dynamically load mammoth from CDN
+        const mammoth = await loadMammoth()
+        const arrayBuffer = await file.arrayBuffer()
+        const result = await mammoth.extractRawText({ arrayBuffer })
+        setAttachment({ name: file.name, type: 'docx', mimeType: 'text/plain', data: result.value, isBase64: false })
+      }
+    } catch (err) {
+      setFileError('Failed to read file: ' + String(err))
+    }
+
+    setFileProcessing(false)
+  }
+
+  // Load mammoth.js from CDN dynamically
+  async function loadMammoth(): Promise<any> {
+    return new Promise((resolve, reject) => {
+      if ((window as any).mammoth) { resolve((window as any).mammoth); return }
+      const script = document.createElement('script')
+      script.src = 'https://cdnjs.cloudflare.com/ajax/libs/mammoth/1.6.0/mammoth.browser.min.js'
+      script.onload = () => resolve((window as any).mammoth)
+      script.onerror = reject
+      document.head.appendChild(script)
+    })
+  }
+
+  function handleFileInput(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0]
+    if (file) processFile(file)
+    // reset input so same file can be re-selected
+    e.target.value = ''
+  }
+
+  function handleDrop(e: React.DragEvent) {
+    e.preventDefault()
+    setDragOver(false)
+    const file = e.dataTransfer.files?.[0]
+    if (file) processFile(file)
+  }
+
+  function removeAttachment() {
+    setAttachment(null)
+    setFileError('')
+  }
+
   // ── Create lesson ──────────────────────────────────────────────────────
   async function handleGenerate() {
-    if (!skillInput.trim())   { setGenError('Please enter a skill name.'); return }
-    if (!lessonTitle.trim())  { setGenError('Please enter a lesson title.'); return }
-    if (!content.trim())      { setGenError('Please enter the lesson content.'); return }
-    if (countBasic + countStd + countAdv === 0) { setGenError('Question counts must total more than 0.'); return }
+    if (!skillInput.trim())  { setGenError('Please enter a skill name.'); return }
+    if (!lessonTitle.trim()) { setGenError('Please enter a lesson title.'); return }
+    if (!attachment && !content.trim()) {
+      setGenError('Please upload a lesson file or enter lesson content.')
+      return
+    }
+    if (countBasic + countStd + countAdv === 0) {
+      setGenError('Question counts must total more than 0.')
+      return
+    }
 
     setGenerating(true)
     setGenError('')
 
-    // 1. Get current user
     const { data: { user } } = await supabase.auth.getUser()
     if (!user) { setGenError('Not authenticated.'); setGenerating(false); return }
 
-    // 2. Get current max order_index for skills in this section
     const { data: existingSkills } = await supabase
       .from('skills')
       .select('order_index')
@@ -116,26 +228,18 @@ export default function LessonsPage() {
       .limit(1)
     const nextOrder = ((existingSkills?.[0]?.order_index ?? 0) + 1)
 
-    // 3. Insert skill
     const { data: skillRow, error: skillErr } = await supabase
       .from('skills')
-      .insert({
-        teacher_id: user.id,
-        section_id: sectionId,
-        subject,
-        name: skillInput.trim(),
-        order_index: nextOrder,
-      })
+      .insert({ teacher_id: user.id, section_id: sectionId, subject, name: skillInput.trim(), order_index: nextOrder })
       .select('id')
       .single()
 
     if (skillErr || !skillRow) {
-      setGenError('Failed to create skill: ' + (skillErr?.message ?? 'unknown error'))
+      setGenError('Failed to create skill: ' + (skillErr?.message ?? 'unknown'))
       setGenerating(false)
       return
     }
 
-    // 4. Insert lesson
     const { data: lessonRow, error: lessonErr } = await supabase
       .from('lessons')
       .insert({
@@ -143,7 +247,7 @@ export default function LessonsPage() {
         section_id: sectionId,
         skill_id: skillRow.id,
         title: lessonTitle.trim(),
-        content: content.trim(),
+        content: content.trim() || (attachment?.isBase64 ? '[file attachment]' : attachment?.data ?? ''),
         count_basic: countBasic,
         count_standard: countStd,
         count_advanced: countAdv,
@@ -152,16 +256,30 @@ export default function LessonsPage() {
       .single()
 
     if (lessonErr || !lessonRow) {
-      setGenError('Failed to create lesson: ' + (lessonErr?.message ?? 'unknown error'))
+      setGenError('Failed to create lesson: ' + (lessonErr?.message ?? 'unknown'))
       setGenerating(false)
       return
     }
 
-    // 5. Call Gemini API
+    // Build request body — include file attachment if present
+    const requestBody: Record<string, any> = { lesson_id: lessonRow.id }
+    if (attachment) {
+      requestBody.file_data = {
+        data: attachment.data,
+        mimeType: attachment.mimeType,
+        isBase64: attachment.isBase64,
+        fileName: attachment.name,
+      }
+    }
+    // If there's also manual content alongside a file, send it too
+    if (content.trim() && attachment) {
+      requestBody.extra_content = content.trim()
+    }
+
     const res = await fetch('/api/questions', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ lesson_id: lessonRow.id }),
+      body: JSON.stringify(requestBody),
     })
     const json = await res.json()
 
@@ -171,7 +289,6 @@ export default function LessonsPage() {
       return
     }
 
-    // 6. Fetch generated questions
     const { data: qRows } = await supabase
       .from('questions')
       .select('id, lesson_id, skill_id, difficulty, stem, options, correct_index, status')
@@ -180,30 +297,21 @@ export default function LessonsPage() {
     const generated = qRows ?? []
     setPendingQs(generated)
 
-    // Pre-select all by default
     const sel: Record<string, boolean> = {}
     for (const q of generated) sel[q.id] = true
     setSelected(sel)
 
-    setNewLessonId(lessonRow.id)
     setFormStep('review')
     setGenerating(false)
   }
 
-  // ── Approve selected questions ─────────────────────────────────────────
+  // ── Approve ────────────────────────────────────────────────────────────
   async function handleApprove() {
     setSaving(true)
-    const approvedIds  = pendingQs.filter(q => selected[q.id]).map(q => q.id)
-    const rejectedIds  = pendingQs.filter(q => !selected[q.id]).map(q => q.id)
-
-    if (approvedIds.length > 0) {
-      await supabase.from('questions').update({ status: 'approved' }).in('id', approvedIds)
-    }
-    if (rejectedIds.length > 0) {
-      await supabase.from('questions').update({ status: 'rejected' }).in('id', rejectedIds)
-    }
-
-    // Reload and reset
+    const approvedIds = pendingQs.filter(q =>  selected[q.id]).map(q => q.id)
+    const rejectedIds = pendingQs.filter(q => !selected[q.id]).map(q => q.id)
+    if (approvedIds.length > 0) await supabase.from('questions').update({ status: 'approved' }).in('id', approvedIds)
+    if (rejectedIds.length > 0) await supabase.from('questions').update({ status: 'rejected' }).in('id', rejectedIds)
     await loadData()
     resetForm()
     setSaving(false)
@@ -220,25 +328,35 @@ export default function LessonsPage() {
     setCountStd(5)
     setCountAdv(5)
     setGenError('')
-    setNewLessonId(null)
+    setAttachment(null)
+    setFileError('')
     setPendingQs([])
     setSelected({})
   }
 
-  // ── Helpers ────────────────────────────────────────────────────────────
-  function getQsForLesson(lessonId: string) {
-    return questions.filter(q => q.lesson_id === lessonId)
+  // ── Delete ─────────────────────────────────────────────────────────────
+  async function handleDelete(lessonId: string) {
+    if (!confirm('Delete this lesson and all its questions? This cannot be undone.')) return
+    setDeletingId(lessonId)
+    const lesson = lessons.find(l => l.id === lessonId)
+    const skillId = lesson?.skill_id
+    await supabase.from('questions').delete().eq('lesson_id', lessonId)
+    await supabase.from('lessons').delete().eq('id', lessonId)
+    if (skillId) await supabase.from('skills').delete().eq('id', skillId)
+    await loadData()
+    setDeletingId(null)
   }
+
+  // ── Helpers ────────────────────────────────────────────────────────────
+  function getQsForLesson(lessonId: string) { return questions.filter(q => q.lesson_id === lessonId) }
   function approvedCount(lessonId: string, diff: string) {
     return questions.filter(q => q.lesson_id === lessonId && q.difficulty === diff && q.status === 'approved').length
   }
-  function toggleSelect(id: string) {
-    setSelected(prev => ({ ...prev, [id]: !prev[id] }))
-  }
+  function toggleSelect(id: string) { setSelected(prev => ({ ...prev, [id]: !prev[id] })) }
   function toggleAll(diff: 'basic' | 'standard' | 'advanced') {
     const tier = pendingQs.filter(q => q.difficulty === diff)
     const allSelected = tier.every(q => selected[q.id])
-    const update: Record<string, boolean> = { ...selected }
+    const update = { ...selected }
     for (const q of tier) update[q.id] = !allSelected
     setSelected(update)
   }
@@ -260,7 +378,6 @@ export default function LessonsPage() {
         .back-link{display:inline-flex;align-items:center;gap:6px;font-size:13px;color:var(--text-soft);text-decoration:none;font-weight:300;margin-bottom:28px;transition:color 0.2s;}
         .back-link:hover{color:var(--green);}
 
-        /* PAGE HEADER */
         .page-top{display:flex;align-items:flex-start;justify-content:space-between;margin-bottom:32px;gap:16px;flex-wrap:wrap;}
         .ph-eyebrow{display:flex;align-items:center;gap:8px;margin-bottom:6px;}
         .ph-line{width:20px;height:2px;background:var(--crimson);}
@@ -269,25 +386,11 @@ export default function LessonsPage() {
         .ph-title em{color:var(--crimson);font-style:italic;}
         .ph-sub{font-size:14px;color:var(--text-soft);margin-top:5px;}
 
-        .btn-new{
-          display:inline-flex;align-items:center;gap:8px;
-          background:var(--green-dark);color:var(--cream);
-          border:none;border-radius:8px;padding:11px 20px;
-          font-family:'DM Sans',sans-serif;font-size:13px;font-weight:500;
-          cursor:pointer;transition:background 0.15s;white-space:nowrap;
-          text-decoration:none;
-        }
+        .btn-new{display:inline-flex;align-items:center;gap:8px;background:var(--green-dark);color:var(--cream);border:none;border-radius:8px;padding:11px 20px;font-family:'DM Sans',sans-serif;font-size:13px;font-weight:500;cursor:pointer;transition:background 0.15s;white-space:nowrap;text-decoration:none;}
         .btn-new:hover{background:var(--green);}
 
-        /* CREATE FORM */
-        .form-card{
-          background:var(--white);border:1px solid var(--border);
-          border-radius:12px;margin-bottom:32px;overflow:hidden;
-        }
-        .form-card-header{
-          background:var(--green-dark);padding:20px 28px;
-          display:flex;align-items:center;justify-content:space-between;
-        }
+        .form-card{background:var(--white);border:1px solid var(--border);border-radius:12px;margin-bottom:32px;overflow:hidden;}
+        .form-card-header{background:var(--green-dark);padding:20px 28px;display:flex;align-items:center;justify-content:space-between;}
         .form-card-title{font-family:'Cormorant Garamond',serif;font-size:20px;font-weight:600;color:#fff;}
         .form-card-body{padding:28px;}
 
@@ -296,17 +399,43 @@ export default function LessonsPage() {
 
         .field{margin-bottom:0;}
         .field label{display:block;font-size:11px;font-weight:600;letter-spacing:1.5px;text-transform:uppercase;color:var(--green);margin-bottom:8px;}
-        .field input,.field textarea,.field select{
-          width:100%;padding:11px 14px;
-          border:1.5px solid var(--border);border-radius:7px;
-          background:var(--cream);font-family:'DM Sans',sans-serif;
-          font-size:14px;color:var(--text);outline:none;
-          transition:border-color 0.2s,box-shadow 0.2s;
+        .field input,.field textarea,.field select{width:100%;padding:11px 14px;border:1.5px solid var(--border);border-radius:7px;background:var(--cream);font-family:'DM Sans',sans-serif;font-size:14px;color:var(--text);outline:none;transition:border-color 0.2s,box-shadow 0.2s;}
+        .field input:focus,.field textarea:focus,.field select:focus{border-color:var(--green);box-shadow:0 0 0 3px rgba(27,94,48,0.1);}
+        .field textarea{resize:vertical;min-height:100px;line-height:1.6;}
+
+        /* FILE UPLOAD */
+        .upload-zone{
+          border:2px dashed var(--border);border-radius:10px;
+          padding:28px 20px;text-align:center;cursor:pointer;
+          transition:border-color 0.2s,background 0.2s;
+          background:var(--cream);
         }
-        .field input:focus,.field textarea:focus,.field select:focus{
-          border-color:var(--green);box-shadow:0 0 0 3px rgba(27,94,48,0.1);
+        .upload-zone:hover,.upload-zone.drag-over{
+          border-color:var(--green);background:rgba(27,94,48,0.04);
         }
-        .field textarea{resize:vertical;min-height:110px;line-height:1.6;}
+        .upload-icon{font-size:28px;margin-bottom:8px;display:block;}
+        .upload-title{font-size:14px;font-weight:500;color:var(--text);margin-bottom:4px;}
+        .upload-sub{font-size:12px;color:var(--text-soft);}
+        .upload-sub span{color:var(--green);font-weight:500;text-decoration:underline;cursor:pointer;}
+
+        .file-preview{
+          display:flex;align-items:center;gap:12px;
+          background:rgba(27,94,48,0.05);border:1.5px solid rgba(27,94,48,0.2);
+          border-radius:8px;padding:12px 16px;
+        }
+        .file-preview-icon{font-size:22px;flex-shrink:0;}
+        .file-preview-info{flex:1;min-width:0;}
+        .file-preview-name{font-size:13px;font-weight:500;color:var(--text);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+        .file-preview-type{font-size:11px;color:var(--green);margin-top:2px;font-weight:600;letter-spacing:0.5px;text-transform:uppercase;}
+        .file-remove{background:none;border:none;color:var(--text-soft);cursor:pointer;font-size:16px;padding:4px;border-radius:4px;transition:color 0.15s;flex-shrink:0;}
+        .file-remove:hover{color:var(--crimson);}
+        .file-processing{display:flex;align-items:center;gap:10px;padding:14px 16px;background:var(--cream);border:1.5px solid var(--border);border-radius:8px;font-size:13px;color:var(--text-soft);}
+        .file-processing-spinner{animation:spin 0.8s linear infinite;display:inline-block;font-size:14px;}
+        .file-error-box{background:rgba(139,26,26,0.06);border:1px solid rgba(139,26,26,0.2);border-radius:7px;padding:10px 14px;color:var(--crimson);font-size:12px;margin-top:8px;}
+
+        .content-divider{display:flex;align-items:center;gap:10px;margin:16px 0 0;}
+        .content-divider-line{flex:1;height:1px;background:var(--border);}
+        .content-divider-text{font-size:11px;color:var(--text-soft);font-weight:500;letter-spacing:0.5px;white-space:nowrap;}
 
         .counts-row{display:grid;grid-template-columns:repeat(3,1fr);gap:14px;}
         .count-field{text-align:center;}
@@ -314,13 +443,7 @@ export default function LessonsPage() {
         .count-field label.basic-lbl{color:var(--green);}
         .count-field label.std-lbl{color:var(--gold);}
         .count-field label.adv-lbl{color:var(--crimson);}
-        .count-input{
-          width:100%;padding:12px;text-align:center;
-          border:1.5px solid var(--border);border-radius:7px;
-          background:var(--cream);font-family:'Cormorant Garamond',serif;
-          font-size:28px;font-weight:700;color:var(--text);outline:none;
-          transition:border-color 0.2s;
-        }
+        .count-input{width:100%;padding:12px;text-align:center;border:1.5px solid var(--border);border-radius:7px;background:var(--cream);font-family:'Cormorant Garamond',serif;font-size:28px;font-weight:700;color:var(--text);outline:none;transition:border-color 0.2s;}
         .count-input:focus{border-color:var(--green);}
 
         .error-box{background:rgba(139,26,26,0.07);border:1px solid rgba(139,26,26,0.22);border-left:3px solid var(--crimson);border-radius:7px;padding:11px 16px;color:var(--crimson);font-size:13px;margin-top:16px;}
@@ -332,36 +455,22 @@ export default function LessonsPage() {
         .btn-generate:hover:not(:disabled){background:var(--green);}
         .btn-generate:disabled{opacity:0.55;cursor:not-allowed;}
 
-        /* REVIEW STEP */
         .review-header{margin-bottom:20px;}
         .review-title{font-family:'Cormorant Garamond',serif;font-size:22px;font-weight:600;color:var(--text);margin-bottom:4px;}
         .review-sub{font-size:13px;color:var(--text-soft);}
 
         .tier-section{margin-bottom:24px;}
-        .tier-header{
-          display:flex;align-items:center;justify-content:space-between;
-          padding:10px 16px;border-radius:8px;margin-bottom:12px;cursor:pointer;
-        }
+        .tier-header{display:flex;align-items:center;justify-content:space-between;padding:10px 16px;border-radius:8px;margin-bottom:12px;}
         .tier-header-left{display:flex;align-items:center;gap:10px;}
         .tier-badge{font-size:11px;font-weight:600;padding:3px 10px;border-radius:4px;}
         .tier-count{font-size:12px;color:var(--text-soft);}
         .tier-toggle-all{font-size:12px;font-weight:500;cursor:pointer;text-decoration:underline;background:none;border:none;color:var(--text-soft);padding:0;}
         .tier-toggle-all:hover{color:var(--green-dark);}
 
-        .q-card{
-          background:var(--cream);border:1.5px solid var(--border);
-          border-radius:9px;padding:16px 18px;margin-bottom:10px;
-          display:flex;gap:14px;align-items:flex-start;
-          transition:border-color 0.15s,background 0.15s;cursor:pointer;
-        }
+        .q-card{background:var(--cream);border:1.5px solid var(--border);border-radius:9px;padding:16px 18px;margin-bottom:10px;display:flex;gap:14px;align-items:flex-start;transition:border-color 0.15s,background 0.15s;cursor:pointer;}
         .q-card.selected{background:var(--white);border-color:var(--green);}
         .q-card.rejected-card{opacity:0.45;}
-        .q-checkbox{
-          width:18px;height:18px;border-radius:4px;flex-shrink:0;
-          border:1.5px solid var(--border);background:var(--white);
-          display:flex;align-items:center;justify-content:center;
-          margin-top:2px;transition:all 0.15s;
-        }
+        .q-checkbox{width:18px;height:18px;border-radius:4px;flex-shrink:0;border:1.5px solid var(--border);background:var(--white);display:flex;align-items:center;justify-content:center;margin-top:2px;transition:all 0.15s;}
         .q-card.selected .q-checkbox{background:var(--green-dark);border-color:var(--green-dark);}
         .q-checkbox-tick{color:#fff;font-size:11px;font-weight:700;}
         .q-body{flex:1;}
@@ -370,24 +479,16 @@ export default function LessonsPage() {
         .q-option{font-size:12px;color:var(--text-soft);padding:5px 9px;border-radius:5px;background:rgba(0,0,0,0.03);}
         .q-option.correct{background:rgba(27,94,48,0.1);color:var(--green);font-weight:500;}
 
-        .approve-bar{
-          background:var(--cream2);border-top:1px solid var(--border);
-          padding:16px 28px;display:flex;align-items:center;justify-content:space-between;
-          gap:12px;flex-wrap:wrap;
-        }
+        .approve-bar{background:var(--cream2);border-top:1px solid var(--border);padding:16px 28px;display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;}
         .approve-summary{font-size:13px;color:var(--text-soft);}
         .approve-summary strong{color:var(--text);}
         .btn-approve{background:var(--green-dark);color:var(--cream);border:none;border-radius:7px;padding:10px 28px;font-family:'DM Sans',sans-serif;font-size:14px;font-weight:600;cursor:pointer;transition:background 0.15s;}
         .btn-approve:hover:not(:disabled){background:var(--green);}
         .btn-approve:disabled{opacity:0.55;cursor:not-allowed;}
 
-        /* LESSON CARDS */
         .lessons-list{display:flex;flex-direction:column;gap:14px;}
         .lesson-card{background:var(--white);border:1px solid var(--border);border-radius:12px;overflow:hidden;}
-        .lesson-card-top{
-          display:flex;align-items:center;gap:16px;padding:18px 22px;
-          cursor:pointer;transition:background 0.15s;
-        }
+        .lesson-card-top{display:flex;align-items:center;gap:16px;padding:18px 22px;cursor:pointer;transition:background 0.15s;}
         .lesson-card-top:hover{background:var(--cream);}
         .lesson-subj-ico{width:38px;height:38px;border-radius:8px;display:flex;align-items:center;justify-content:center;font-size:13px;font-weight:600;flex-shrink:0;}
         .lesson-info{flex:1;}
@@ -398,18 +499,10 @@ export default function LessonsPage() {
         .lesson-chevron{color:var(--text-soft);font-size:12px;transition:transform 0.2s;}
         .lesson-chevron.open{transform:rotate(180deg);}
 
-        /* LESSON EXPANDED */
         .lesson-expanded{border-top:1px solid var(--border);padding:20px 22px;}
         .exp-tier{margin-bottom:20px;}
-        .exp-tier-title{
-          display:flex;align-items:center;gap:8px;
-          font-size:11px;font-weight:600;letter-spacing:1.5px;text-transform:uppercase;
-          margin-bottom:10px;padding-bottom:8px;border-bottom:1px solid var(--border);
-        }
-        .exp-q-card{
-          background:var(--cream);border:1px solid var(--border);
-          border-radius:8px;padding:14px 16px;margin-bottom:8px;
-        }
+        .exp-tier-title{display:flex;align-items:center;gap:8px;font-size:11px;font-weight:600;letter-spacing:1.5px;text-transform:uppercase;margin-bottom:10px;padding-bottom:8px;border-bottom:1px solid var(--border);}
+        .exp-q-card{background:var(--cream);border:1px solid var(--border);border-radius:8px;padding:14px 16px;margin-bottom:8px;}
         .exp-q-card.approved{border-color:rgba(27,94,48,0.3);background:rgba(27,94,48,0.03);}
         .exp-q-card.rejected{opacity:0.4;}
         .exp-q-stem{font-size:13px;font-weight:500;color:var(--text);margin-bottom:8px;line-height:1.5;}
@@ -439,6 +532,15 @@ export default function LessonsPage() {
         }
       `}</style>
 
+      {/* Hidden file input */}
+      <input
+        ref={fileInputRef}
+        type="file"
+        accept=".pdf,.docx,.txt,image/jpeg,image/png,image/gif,image/webp,application/pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document,text/plain"
+        style={{ display: 'none' }}
+        onChange={handleFileInput}
+      />
+
       <a href={`/teacher/${sectionId}`} className="back-link">← Back to Classroom</a>
 
       {/* PAGE HEADER */}
@@ -466,7 +568,11 @@ export default function LessonsPage() {
               {formStep === 'details' ? 'Create New Lesson' : 'Review Generated Questions'}
             </span>
             {formStep === 'details' && (
-              <button className="btn-cancel" style={{ color: 'rgba(255,255,255,0.6)', borderColor: 'rgba(255,255,255,0.2)', background: 'transparent' }} onClick={resetForm}>
+              <button
+                className="btn-cancel"
+                style={{ color: 'rgba(255,255,255,0.6)', borderColor: 'rgba(255,255,255,0.2)', background: 'transparent' }}
+                onClick={resetForm}
+              >
                 Cancel
               </button>
             )}
@@ -477,11 +583,12 @@ export default function LessonsPage() {
             generating ? (
               <div className="generating-overlay">
                 <div className="generating-spinner">⚙</div>
-                <div className="generating-text">Gemini is generating your questions…</div>
+                <div className="generating-text">Gemini is reading your file and generating questions…</div>
               </div>
             ) : (
               <div className="form-card-body">
                 <div className="form-grid">
+
                   {/* Subject */}
                   <div className="field">
                     <label>Subject</label>
@@ -512,11 +619,71 @@ export default function LessonsPage() {
                     />
                   </div>
 
-                  {/* Content */}
+                  {/* FILE UPLOAD */}
+                  <div className="form-grid-full">
+                    <div style={{ fontSize: '11px', fontWeight: 600, letterSpacing: '1.5px', textTransform: 'uppercase', color: 'var(--green)', marginBottom: '10px' }}>
+                      Lesson File
+                    </div>
+
+                    {fileProcessing ? (
+                      <div className="file-processing">
+                        <span className="file-processing-spinner">⚙</span>
+                        Reading file…
+                      </div>
+                    ) : attachment ? (
+                      <div className="file-preview">
+                        <span className="file-preview-icon">{FILE_ICON[attachment.type]}</span>
+                        <div className="file-preview-info">
+                          <div className="file-preview-name">{attachment.name}</div>
+                          <div className="file-preview-type">
+                            {attachment.type === 'docx' ? 'Word Document' :
+                             attachment.type === 'pdf'  ? 'PDF' :
+                             attachment.type === 'image'? 'Image' : 'Plain Text'}
+                            {' '}· ready for Gemini
+                          </div>
+                        </div>
+                        <button className="file-remove" onClick={removeAttachment} title="Remove file">✕</button>
+                      </div>
+                    ) : (
+                      <div
+                        className={`upload-zone ${dragOver ? 'drag-over' : ''}`}
+                        onClick={() => fileInputRef.current?.click()}
+                        onDragOver={e => { e.preventDefault(); setDragOver(true) }}
+                        onDragLeave={() => setDragOver(false)}
+                        onDrop={handleDrop}
+                      >
+                        <span className="upload-icon">📎</span>
+                        <div className="upload-title">Drop your lesson file here</div>
+                        <div className="upload-sub">
+                          or <span>browse to upload</span> · PDF, Word (.docx), image, or .txt
+                        </div>
+                      </div>
+                    )}
+
+                    {fileError && <div className="file-error-box">{fileError}</div>}
+                  </div>
+
+                  {/* Optional content textarea */}
+                  <div className="form-grid-full">
+                    <div className="content-divider">
+                      <div className="content-divider-line" />
+                      <span className="content-divider-text">
+                        {attachment ? 'add extra context (optional)' : 'or type content manually'}
+                      </span>
+                      <div className="content-divider-line" />
+                    </div>
+                  </div>
+
                   <div className="field form-grid-full">
-                    <label>Lesson Content / Topic</label>
+                    <label style={{ color: attachment ? 'var(--text-soft)' : 'var(--green)' }}>
+                      Lesson Content {attachment ? '(optional — supplements the file)' : ''}
+                    </label>
                     <textarea
-                      placeholder="Paste or type the lesson content that Gemini will use to generate questions…"
+                      placeholder={
+                        attachment
+                          ? 'Optional: add extra notes or context alongside the uploaded file…'
+                          : 'Paste or type the lesson content that Gemini will use to generate questions…'
+                      }
                       value={content}
                       onChange={e => setContent(e.target.value)}
                     />
@@ -548,8 +715,12 @@ export default function LessonsPage() {
 
                 <div className="form-actions">
                   <button className="btn-cancel" onClick={resetForm}>Cancel</button>
-                  <button className="btn-generate" onClick={handleGenerate} disabled={generating}>
-                    Generate Questions with AI
+                  <button
+                    className="btn-generate"
+                    onClick={handleGenerate}
+                    disabled={generating || fileProcessing}
+                  >
+                    {fileProcessing ? 'Processing file…' : 'Generate Questions with AI'}
                   </button>
                 </div>
               </div>
@@ -665,6 +836,18 @@ export default function LessonsPage() {
                       )
                     })}
                   </div>
+                  <button
+                    onClick={e => { e.stopPropagation(); handleDelete(lesson.id) }}
+                    disabled={deletingId === lesson.id}
+                    style={{
+                      background: 'none', border: '1px solid rgba(139,26,26,0.2)',
+                      borderRadius: '6px', padding: '5px 10px', cursor: 'pointer',
+                      color: 'var(--crimson)', fontSize: '12px', fontFamily: "'DM Sans',sans-serif",
+                      opacity: deletingId === lesson.id ? 0.5 : 1, flexShrink: 0,
+                    }}
+                  >
+                    {deletingId === lesson.id ? '…' : 'Delete'}
+                  </button>
                   <span className={`lesson-chevron ${isOpen ? 'open' : ''}`}>▼</span>
                 </div>
 
