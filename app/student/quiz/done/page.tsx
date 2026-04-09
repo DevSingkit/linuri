@@ -1,6 +1,5 @@
 'use client';
-
-import { useEffect, useState } from 'react';
+import { Suspense, useEffect, useState } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { createClient } from '@/lib/client';
 import LogoutButton from '@/components/LogoutButton';
@@ -48,7 +47,7 @@ const DIFFICULTY_LABEL: Record<string, string> = {
   advanced: 'Advanced',
 };
 
-export default function QuizDonePage() {
+function QuizDoneContent() {
   const router = useRouter();
   const params = useSearchParams();
   const attemptId = params.get('attemptId') ?? '';
@@ -369,5 +368,13 @@ export default function QuizDonePage() {
         </main>
       </div>
     </>
+  );
+}
+
+export default function QuizDonePage() {
+  return (
+    <Suspense fallback={<div style={{ padding: 24 }}>Loading…</div>}>
+      <QuizDoneContent />
+    </Suspense>
   );
 }
