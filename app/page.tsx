@@ -1017,7 +1017,7 @@ export default function LandingPage() {
           <div>
             <div style={{ background: '#0d3a1b', borderRadius: '16px', padding: '40px', position: 'relative', overflow: 'hidden' }}>
               <div style={{ position: 'absolute', width: '280px', height: '280px', borderRadius: '50%', border: '1px solid rgba(201,148,26,0.1)', top: '-70px', right: '-70px' }} />
-              <div style={{ fontFamily: "'Cormorant Garamond', serif", fontSize: '80px', color: 'rgba(201,148,26,0.15)', lineHeight: 0.8, marginBottom: '16px' }}>"</div>
+              <div style={{ fontFamily: "'Cormorant Garamond', serif", fontSize: '80px', color: 'rgba(201,148,26,0.15)', lineHeight: 0.8, marginBottom: '16px' }}>&ldquo;</div>
               <p style={{ fontFamily: "'Cormorant Garamond', serif", fontSize: '22px', fontStyle: 'italic', lineHeight: 1.6, color: 'rgba(255,255,255,0.9)', marginBottom: '20px' }}>
                 We connect knowledge and vital piety — educating the whole person in body, mind, and spirit.
               </p>
