@@ -20,7 +20,7 @@ export async function POST(req: NextRequest) {
   }
 
   const { content, count_basic, count_standard, count_advanced, skills } = lesson;
-  const skillName = (skills as any).name;
+  const skillName = (skills as { name: string }).name;
 
   const model = genAI.getGenerativeModel({ model: "gemini-2.0-flash" });
 
@@ -50,7 +50,7 @@ ${content}`;
       }
     }
 
-    const rows = questions.map((q: any) => ({
+    const rows = questions.map((q: { difficulty: string; stem: string; options: string[]; correct_index: number }) => ({
       lesson_id,
       skill_id: lesson.skill_id,
       difficulty: q.difficulty,
