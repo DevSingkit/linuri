@@ -3,6 +3,7 @@
 import { usePathname, useRouter } from 'next/navigation'
 import { useEffect, useState } from 'react'
 import { createClient } from '@/lib/client'
+import LogoutButton from '@/components/LogoutButton'
 
 export default function TeacherLayout({ children }: { children: React.ReactNode }) {
   const [fullName, setFullName] = useState('')
@@ -216,8 +217,8 @@ export default function TeacherLayout({ children }: { children: React.ReactNode 
 
         /* Sidebar bottom */
         .sidebar-bottom {
-          padding: 16px 12px;
-          border-top: 1px solid rgba(201,148,26,0.1);
+          padding: 16px 24px;
+          border-top: 1px solid rgba(255,255,255,0.08);
           flex-shrink: 0;
           position: relative;
           z-index: 1;
@@ -283,9 +284,17 @@ export default function TeacherLayout({ children }: { children: React.ReactNode 
         .content { flex: 1; padding: 40px; }
 
         @media (max-width: 768px) {
-          .sidebar { width: 0; min-width: 0; }
+          .sidebar { 
+            width: 100%; 
+            min-width: unset; 
+            height: auto; 
+            position: static;
+            flex-direction: column;
+          }
+          .shell { flex-direction: column; }
           .main { margin-left: 0; }
           .content { padding: 24px 20px; }
+          .sidebar-nav { overflow: visible; }
         }
       `}</style>
 
@@ -315,13 +324,10 @@ export default function TeacherLayout({ children }: { children: React.ReactNode 
               <span className="nav-label">My Classrooms</span>
             </a>
 
-            <div className="nav-section-label" style={{ marginTop: '500px' }}>Account</div>
-
-            <button className="nav-item btn-logout" onClick={handleLogout}>
-              <span className="nav-icon">→</span>
-              <span className="nav-label">Sign Out</span>
-            </button>
-          </nav>
+            </nav>
+          <div className="sidebar-bottom">
+            <LogoutButton />
+          </div>
         </aside>
 
         {/* ── MAIN ── */}

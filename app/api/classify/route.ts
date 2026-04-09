@@ -58,7 +58,8 @@ export async function POST(req: NextRequest) {
   });
 
   // Save mastery record
-  await supabase.from("mastery").insert({
+  await supabase.from("mastery").upsert(
+  {
     student_id: attempt.student_id,
     skill_id: attempt.skill_id,
     attempt_id,
@@ -66,7 +67,9 @@ export async function POST(req: NextRequest) {
     accuracy,
     attempt_count: attemptCount ?? 1,
     trend,
-  });
+  },
+  { onConflict: "student_id,skill_id" }
+);
 
   // Get adaptive result
   const adaptive = next(level, attempt.difficulty);

@@ -3,6 +3,8 @@ import { createServerClient } from '@supabase/ssr';
 import { redirect } from 'next/navigation';
 import LogoutButton from '@/components/LogoutButton';
 
+export const dynamic = 'force-dynamic';
+
 export default async function StudentDashboard() {
   const cookieStore = cookies();
 
@@ -32,7 +34,7 @@ export default async function StudentDashboard() {
 
   const { data: skills } = await supabase
     .from('skills')
-    .select(`id, name, subject, order_index, progress!left(current_difficulty, regressions, flagged)`)
+    .select(`id, name, subject, order_index, progress!left(current_difficulty, regressions, flagged, student_id)`)
     .eq('section_id', profile.section_id)
     .order('order_index');
 
@@ -55,7 +57,9 @@ export default async function StudentDashboard() {
   for (const skill of skills ?? []) {
     const sub = skill.subject ?? 'Other';
     if (!grouped[sub]) grouped[sub] = [];
-    const prog = Array.isArray(skill.progress) ? skill.progress[0] : skill.progress;
+    const prog = Array.isArray(skill.progress)
+  ? skill.progress.find((p: any) => p.student_id === user.id) ?? null
+  : skill.progress;
     grouped[sub].push({ ...skill, progress: prog ?? null, mastery: masteryMap[skill.id] ?? null });
   }
 
@@ -186,7 +190,7 @@ export default async function StudentDashboard() {
             <a href="/student" className="nav-a active">
               <span className="nav-ic">◈</span> My Skills
             </a>
-            <a href="/student/quiz" className="nav-a">
+            <a href="/student/quiz/done" className="nav-a">
               <span className="nav-ic">◉</span> My Quiz
             </a>
           </nav>
@@ -271,7 +275,7 @@ export default async function StudentDashboard() {
                           ) : (
                             <div className="m-row">
                               <div className="m-dot" style={{ background: '#ccc' }} />
-                              <span className="m-lbl" style={{ color: '#aaa' }}>Not started yet</span>
+                              <span className="m-lbl" style={{ color: '#aaa' }}> </span>
                             </div>
                           )}
                           <div className="sk-footer">

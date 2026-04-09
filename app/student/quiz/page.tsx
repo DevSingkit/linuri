@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState, useCallback, useRef } from 'react';
+import { useEffect, useState, useCallback, useRef, Suspense } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { createClient } from '@/lib/client';
 import LogoutButton from '@/components/LogoutButton';
@@ -26,7 +26,7 @@ type SidebarData = {
   section_name: string;
 };
 
-export default function QuizPage() {
+function QuizContent() {
   const router = useRouter();
   const params = useSearchParams();
   const skillId = params.get('skillId') ?? '';
@@ -550,5 +550,13 @@ export default function QuizPage() {
         </main>
       </div>
     </>
+  );
+}
+
+export default function QuizPage() {
+  return (
+    <Suspense fallback={<div style={{ padding: 24 }}>Loading…</div>}>
+      <QuizContent />
+    </Suspense>
   );
 }

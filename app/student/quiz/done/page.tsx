@@ -290,9 +290,9 @@ function QuizDoneContent() {
           {!loading && error && (
             <div className="state-screen">
               <p style={{ color: 'var(--crimson)' }}>{error}</p>
-              <button className="btn-primary" onClick={() => router.push('/student')} style={{ maxWidth: 200 }}>
-                Back to Dashboard
-              </button>
+              <button className="btn-ghost" onClick={() => router.replace('/student')}>
+  Back to Dashboard
+</button>
             </div>
           )}
 
@@ -353,15 +353,14 @@ function QuizDoneContent() {
 
                 <button
                   className="btn-primary"
-                  onClick={() =>
-                    router.push(`/student/quiz?skillId=${skillId}&difficulty=${result.next_difficulty}`)
-                  }
+                  onClick={() => router.replace(`/student/quiz?skillId=${skillId}&difficulty=${result.next_difficulty}`)}
+                  
                 >
-                  Practice Again
+                  Next
                 </button>
-                <button className="btn-ghost" onClick={() => router.push('/student')}>
-                  Back to Dashboard
-                </button>
+                <button className="btn-ghost" onClick={() => router.replace('/student')}>
+  Back to Dashboard
+</button>
               </div>
             </div>
           )}
