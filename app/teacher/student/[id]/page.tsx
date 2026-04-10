@@ -35,6 +35,17 @@ type SkillRow = {
   } | null
 }
 
+type HistoryRow = {
+  id: string
+  skill_id: string
+  level: string
+  accuracy: number
+  attempt_count: number
+  trend: string
+  difficulty: string
+  classified_at: string
+}
+
 const subjectOrder = ['English', 'Mathematics', 'Science']
 
 const diffLabel: Record<string, string> = { basic: 'Basic', standard: 'Standard', advanced: 'Advanced' }
@@ -43,6 +54,8 @@ const diffBg: Record<string, string>     = { basic: 'rgba(27,94,48,0.1)', standa
 const masteryColor: Record<string, string> = { mastered: '#1b5e30', developing: '#c9941a', needs_help: '#8b1a1a' }
 const masteryLabel: Record<string, string> = { mastered: 'Mastered', developing: 'Developing', needs_help: 'Needs Help' }
 const masteryBg: Record<string, string>    = { mastered: 'rgba(27,94,48,0.08)', developing: 'rgba(201,148,26,0.08)', needs_help: 'rgba(139,26,26,0.08)' }
+const trendLabel: Record<string, string>   = { improving: 'Improving', stable: 'Stable', declining: 'Declining' }
+const trendColor: Record<string, string>   = { improving: '#1b5e30', stable: '#c9941a', declining: '#8b1a1a' }
 
 export default function StudentProfilePage() {
   const { id } = useParams<{ id: string }>()
@@ -50,7 +63,8 @@ export default function StudentProfilePage() {
 
   const [profile, setProfile]   = useState<Profile | null>(null)
   const [section, setSection]   = useState<Section | null>(null)
-  const [skills, setSkills]     = useState<SkillRow[]>([])
+  const [skills,  setSkills]    = useState<SkillRow[]>([])
+  const [history, setHistory]   = useState<HistoryRow[]>([])
   const [loading, setLoading]   = useState(true)
 
   useEffect(() => { loadData() }, [id])
@@ -58,7 +72,6 @@ export default function StudentProfilePage() {
   async function loadData() {
     setLoading(true)
 
-    // Fetch student profile
     const { data: prof } = await supabase
       .from('profiles')
       .select('id, full_name, lrn, section_id')
@@ -68,7 +81,6 @@ export default function StudentProfilePage() {
     if (!prof) { setLoading(false); return }
     setProfile(prof)
 
-    // Fetch section
     if (prof.section_id) {
       const { data: sec } = await supabase
         .from('sections')
@@ -77,7 +89,6 @@ export default function StudentProfilePage() {
         .single()
       setSection(sec)
 
-      // Fetch skills in this section
       const { data: skillRows } = await supabase
         .from('skills')
         .select('id, name, subject, order_index')
@@ -87,7 +98,6 @@ export default function StudentProfilePage() {
       if (skillRows && skillRows.length > 0) {
         const skillIds = skillRows.map((s: any) => s.id)
 
-        // Latest mastery per skill
         const { data: masteryRows } = await supabase
           .from('mastery')
           .select('skill_id, level, accuracy, attempt_count, updated_at')
@@ -100,7 +110,6 @@ export default function StudentProfilePage() {
           if (!masteryMap[row.skill_id]) masteryMap[row.skill_id] = row
         }
 
-        // Progress per skill
         const { data: progressRows } = await supabase
           .from('progress')
           .select('skill_id, current_difficulty, regressions, flagged')
@@ -114,18 +123,27 @@ export default function StudentProfilePage() {
 
         const merged: SkillRow[] = skillRows.map((s: any) => ({
           ...s,
-          mastery: masteryMap[s.id] ?? null,
+          mastery:  masteryMap[s.id]  ?? null,
           progress: progressMap[s.id] ?? null,
         }))
 
         setSkills(merged)
+
+        // Fetch full mastery history for this student across all skills
+        const { data: historyRows } = await supabase
+          .from('mastery_history')
+          .select('id, skill_id, level, accuracy, attempt_count, trend, difficulty, classified_at')
+          .eq('student_id', id)
+          .in('skill_id', skillIds)
+          .order('classified_at', { ascending: false })
+
+        setHistory(historyRows ?? [])
       }
     }
 
     setLoading(false)
   }
 
-  // Group by subject
   const grouped: Record<string, SkillRow[]> = {}
   for (const skill of skills) {
     const sub = skill.subject ?? 'Other'
@@ -146,6 +164,10 @@ export default function StudentProfilePage() {
 
   const initials = profile?.full_name
     ?.split(' ').map(w => w[0]).join('').toUpperCase().slice(0, 2) ?? '?'
+
+  // Build skill name lookup from skills array
+  const skillNameMap: Record<string, string> = {}
+  for (const s of skills) skillNameMap[s.id] = s.name
 
   return (
     <>
@@ -170,7 +192,6 @@ export default function StudentProfilePage() {
         .back-link{display:inline-flex;align-items:center;gap:6px;font-size:13px;color:var(--text-soft);text-decoration:none;font-weight:300;margin-bottom:28px;transition:color 0.2s;}
         .back-link:hover{color:var(--green);}
 
-        /* PROFILE HEADER CARD */
         .profile-card{
           background:var(--green-dark);border-radius:14px;
           padding:32px 36px;margin-bottom:32px;
@@ -206,7 +227,6 @@ export default function StudentProfilePage() {
         .profile-meta-item strong{color:rgba(255,255,255,0.8);font-weight:500;}
         .profile-meta-sep{width:3px;height:3px;border-radius:50%;background:rgba(255,255,255,0.2);}
 
-        /* STAT CARDS */
         .stats{display:grid;grid-template-columns:repeat(4,1fr);gap:14px;margin-bottom:36px;}
         .sc{background:var(--white);border:1px solid var(--border);border-radius:10px;padding:16px 18px;position:relative;overflow:hidden;}
         .sc::before{content:'';position:absolute;top:0;left:0;right:0;height:3px;}
@@ -218,14 +238,12 @@ export default function StudentProfilePage() {
         .sc-val{font-family:'Cormorant Garamond',serif;font-size:34px;font-weight:600;color:var(--text);line-height:1;}
         .sc-desc{font-size:11px;color:var(--text-soft);margin-top:3px;}
 
-        /* SUBJECT SECTIONS */
         .subj-sec{margin-bottom:32px;}
         .subj-hdr{display:flex;align-items:center;gap:10px;margin-bottom:14px;padding-bottom:8px;border-bottom:1px solid var(--border);}
         .subj-ico{width:32px;height:32px;border-radius:7px;display:flex;align-items:center;justify-content:center;font-size:12px;font-weight:600;flex-shrink:0;}
         .subj-name{font-family:'Cormorant Garamond',serif;font-size:19px;font-weight:600;color:var(--text);}
         .subj-ct{font-size:12px;color:var(--text-soft);margin-left:auto;}
 
-        /* SKILLS TABLE */
         .skills-table{background:var(--white);border:1px solid var(--border);border-radius:10px;overflow:hidden;}
         .skills-table-header{
           display:grid;grid-template-columns:2fr 120px 100px 80px 90px 80px;
@@ -244,22 +262,53 @@ export default function StudentProfilePage() {
 
         .mastery-pill{display:inline-flex;align-items:center;gap:5px;padding:3px 9px;border-radius:20px;font-size:11px;font-weight:500;}
         .mastery-dot{width:6px;height:6px;border-radius:50%;}
-
         .diff-badge{font-size:11px;font-weight:500;padding:2px 8px;border-radius:4px;display:inline-block;}
-
         .acc-cell{font-size:13px;color:var(--text);}
         .acc-sub{font-size:11px;color:var(--text-soft);}
-
         .pbar-wrap{height:4px;background:var(--cream2);border-radius:2px;overflow:hidden;margin-top:4px;}
         .pbar-fill{height:100%;border-radius:2px;}
-
         .flag-badge{font-size:10px;background:rgba(139,26,26,0.08);color:var(--crimson);border:1px solid rgba(139,26,26,0.2);padding:2px 6px;border-radius:4px;display:inline-block;}
         .ok-badge{font-size:10px;background:rgba(27,94,48,0.08);color:var(--green);border:1px solid rgba(27,94,48,0.2);padding:2px 6px;border-radius:4px;display:inline-block;}
-
         .not-started{font-size:12px;color:#bbb;font-style:italic;}
 
-        .empty-state{text-align:center;padding:48px 24px;color:var(--text-soft);font-size:14px;}
+        /* MASTERY HISTORY */
+        .history-section{margin-top:40px;}
+        .history-hdr{display:flex;align-items:center;gap:10px;margin-bottom:16px;padding-bottom:8px;border-bottom:1px solid var(--border);}
+        .history-hdr-line{width:20px;height:2px;background:var(--crimson);}
+        .history-hdr-title{font-family:'Cormorant Garamond',serif;font-size:22px;font-weight:600;color:var(--text);}
+        .history-hdr-count{font-size:12px;color:var(--text-soft);margin-left:auto;}
 
+        .history-skill-block{margin-bottom:20px;}
+        .history-skill-label{
+          font-size:11px;font-weight:600;letter-spacing:1.5px;
+          text-transform:uppercase;color:var(--green);
+          margin-bottom:8px;padding:6px 0;
+          border-bottom:1px solid var(--border);
+        }
+
+        .history-table{background:var(--white);border:1px solid var(--border);border-radius:10px;overflow:hidden;}
+        .history-table-header{
+          display:grid;
+          grid-template-columns:1.6fr 110px 80px 80px 80px 140px;
+          padding:9px 16px;background:var(--cream2);
+          border-bottom:1px solid var(--border);
+          font-size:10px;font-weight:600;letter-spacing:1.5px;
+          text-transform:uppercase;color:var(--green);
+        }
+        .history-row{
+          display:grid;
+          grid-template-columns:1.6fr 110px 80px 80px 80px 140px;
+          padding:11px 16px;
+          border-bottom:1px solid rgba(27,94,48,0.07);
+          align-items:center;font-size:12px;
+          transition:background 0.15s;
+        }
+        .history-row:last-child{border-bottom:none;}
+        .history-row:hover{background:var(--cream);}
+
+        .history-empty{font-size:13px;color:var(--text-soft);font-style:italic;padding:20px 0;text-align:center;}
+
+        .empty-state{text-align:center;padding:48px 24px;color:var(--text-soft);font-size:14px;}
         .loading-state{text-align:center;padding:80px 24px;color:var(--text-soft);font-size:14px;}
 
         @media(max-width:900px){
@@ -267,12 +316,18 @@ export default function StudentProfilePage() {
           .skills-table-header,.skill-row{grid-template-columns:2fr 110px 90px 70px;}
           .skill-row>:nth-child(5),.skill-row>:nth-child(6),
           .skills-table-header>:nth-child(5),.skills-table-header>:nth-child(6){display:none;}
+          .history-table-header,.history-row{grid-template-columns:1.6fr 100px 70px 70px 130px;}
+          .history-row>:nth-child(4),.history-table-header>:nth-child(4){display:none;}
         }
         @media(max-width:600px){
           .profile-card{flex-direction:column;align-items:flex-start;gap:16px;}
           .stats{grid-template-columns:repeat(2,1fr);}
           .skills-table-header,.skill-row{grid-template-columns:2fr 100px 80px;}
           .skill-row>:nth-child(4),.skills-table-header>:nth-child(4){display:none;}
+          .history-table-header,.history-row{grid-template-columns:1.6fr 100px 120px;}
+          .history-row>:nth-child(3),.history-table-header>:nth-child(3),
+          .history-row>:nth-child(4),.history-table-header>:nth-child(4),
+          .history-row>:nth-child(5),.history-table-header>:nth-child(5){display:none;}
         }
       `}</style>
 
@@ -383,24 +438,21 @@ export default function StudentProfilePage() {
                     </div>
 
                     {grouped[subject].map(skill => {
-                      const level    = skill.mastery?.level ?? null
-                      const acc      = skill.mastery?.accuracy ?? 0
-                      const attCt    = skill.mastery?.attempt_count ?? 0
-                      const diff     = skill.progress?.current_difficulty ?? 'basic'
-                      const flagged  = skill.progress?.flagged ?? false
-                      const pct      = level === 'mastered' ? 100
-                                     : level === 'developing' ? Math.min(Math.max(acc, 10), 79)
-                                     : level === 'needs_help' ? Math.min(acc, 49) : 0
+                      const level   = skill.mastery?.level ?? null
+                      const acc     = skill.mastery?.accuracy ?? 0
+                      const attCt   = skill.mastery?.attempt_count ?? 0
+                      const diff    = skill.progress?.current_difficulty ?? 'basic'
+                      const flagged = skill.progress?.flagged ?? false
+                      const pct     = level === 'mastered' ? 100
+                                    : level === 'developing' ? Math.min(Math.max(acc, 10), 79)
+                                    : level === 'needs_help' ? Math.min(acc, 49) : 0
 
                       return (
                         <div className="skill-row" key={skill.id}>
                           <span className="skill-row-name">{skill.name}</span>
 
                           {level ? (
-                            <span
-                              className="mastery-pill"
-                              style={{ background: masteryBg[level], color: masteryColor[level] }}
-                            >
+                            <span className="mastery-pill" style={{ background: masteryBg[level], color: masteryColor[level] }}>
                               <span className="mastery-dot" style={{ background: masteryColor[level] }} />
                               {masteryLabel[level]}
                             </span>
@@ -421,10 +473,7 @@ export default function StudentProfilePage() {
 
                           <span className="acc-cell">{attCt > 0 ? attCt : '—'}</span>
 
-                          <span
-                            className="diff-badge"
-                            style={{ background: diffBg[diff], color: diffColor[diff] }}
-                          >
+                          <span className="diff-badge" style={{ background: diffBg[diff], color: diffColor[diff] }}>
                             {diffLabel[diff]}
                           </span>
 
@@ -440,6 +489,61 @@ export default function StudentProfilePage() {
               )
             })
           )}
+
+          {/* MASTERY HISTORY */}
+          <div className="history-section">
+            <div className="history-hdr">
+              <div className="history-hdr-line" />
+              <span className="history-hdr-title">Mastery History</span>
+              <span className="history-hdr-count">{history.length} classification event{history.length !== 1 ? 's' : ''}</span>
+            </div>
+
+            {history.length === 0 ? (
+              <div className="history-empty">No classification history yet. History is recorded after each quiz submission.</div>
+            ) : (
+              skills.map(skill => {
+                const skillHistory = history.filter(h => h.skill_id === skill.id)
+                if (skillHistory.length === 0) return null
+                return (
+                  <div className="history-skill-block" key={skill.id}>
+                    <div className="history-skill-label">{skill.name} · {skill.subject}</div>
+                    <div className="history-table">
+                      <div className="history-table-header">
+                        <span>Date</span>
+                        <span>Mastery</span>
+                        <span>Accuracy</span>
+                        <span>Attempts</span>
+                        <span>Trend</span>
+                        <span>Difficulty</span>
+                      </div>
+                      {skillHistory.map(h => (
+                        <div className="history-row" key={h.id}>
+                          <span style={{ color: 'var(--text-soft)' }}>
+                            {new Date(h.classified_at).toLocaleDateString('en-PH', {
+                              year: 'numeric', month: 'short', day: 'numeric',
+                              hour: '2-digit', minute: '2-digit',
+                            })}
+                          </span>
+                          <span className="mastery-pill" style={{ background: masteryBg[h.level], color: masteryColor[h.level] }}>
+                            <span className="mastery-dot" style={{ background: masteryColor[h.level] }} />
+                            {masteryLabel[h.level] ?? h.level}
+                          </span>
+                          <span style={{ color: 'var(--text)' }}>{Math.round(h.accuracy)}%</span>
+                          <span style={{ color: 'var(--text-soft)' }}>{h.attempt_count}</span>
+                          <span style={{ color: trendColor[h.trend] ?? 'var(--text-soft)', fontWeight: 500 }}>
+                            {trendLabel[h.trend] ?? h.trend}
+                          </span>
+                          <span className="diff-badge" style={{ background: diffBg[h.difficulty], color: diffColor[h.difficulty] }}>
+                            {diffLabel[h.difficulty] ?? h.difficulty}
+                          </span>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )
+              })
+            )}
+          </div>
         </>
       )}
     </>

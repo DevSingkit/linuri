@@ -2,9 +2,7 @@ import { createServerClient } from '@supabase/ssr'
 import { NextResponse, type NextRequest } from 'next/server'
 
 export async function middleware(request: NextRequest) {
-  let supabaseResponse = NextResponse.next({
-    request,
-  })
+  let supabaseResponse = NextResponse.next({ request })
 
   const supabase = createServerClient(
     process.env.NEXT_PUBLIC_SUPABASE_URL!,
@@ -29,28 +27,21 @@ export async function middleware(request: NextRequest) {
 
   const { data: { user } } = await supabase.auth.getUser()
 
-  // Protect /teacher routes
-  if (request.nextUrl.pathname.startsWith('/teacher')) {
+  const path = request.nextUrl.pathname
+
+  // Only protect /teacher and /student — nothing else
+  if (path.startsWith('/teacher') || path.startsWith('/student')) {
     if (!user) {
       return NextResponse.redirect(new URL('/login', request.url))
     }
   }
 
-  // Protect /student routes
-  if (request.nextUrl.pathname.startsWith('/student')) {
-    if (!user) {
-      return NextResponse.redirect(new URL('/login', request.url))
-    }
-  }
-
-  // Redirect logged-in users away from /login
-  if (request.nextUrl.pathname === '/login' && user) {
-    return NextResponse.redirect(new URL('/student', request.url))
-  }
+  // Do NOT redirect logged-in users away from /login here
+  // Let the login page handle that itself
 
   return supabaseResponse
 }
 
 export const config = {
-  matcher: ['/teacher/:path*', '/student/:path*', '/login'],
+  matcher: ['/teacher/:path*', '/student/:path*'],
 }

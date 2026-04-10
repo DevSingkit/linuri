@@ -57,9 +57,22 @@ export async function POST(req: NextRequest) {
     trend,
   });
 
-  // Save mastery record
+  // Save mastery snapshot (current state — always one row per student+skill)
   await supabase.from("mastery").upsert(
-  {
+    {
+      student_id: attempt.student_id,
+      skill_id: attempt.skill_id,
+      attempt_id,
+      level,
+      accuracy,
+      attempt_count: attemptCount ?? 1,
+      trend,
+    },
+    { onConflict: "student_id,skill_id" }
+  );
+
+  // ── NEW: Insert into mastery_history (one row per classification event) ──
+  await supabase.from("mastery_history").insert({
     student_id: attempt.student_id,
     skill_id: attempt.skill_id,
     attempt_id,
@@ -67,9 +80,9 @@ export async function POST(req: NextRequest) {
     accuracy,
     attempt_count: attemptCount ?? 1,
     trend,
-  },
-  { onConflict: "student_id,skill_id" }
-);
+    difficulty: attempt.difficulty,
+  });
+  // ────────────────────────────────────────────────────────────────────────
 
   // Get adaptive result
   const adaptive = next(level, attempt.difficulty);

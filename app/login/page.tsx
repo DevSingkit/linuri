@@ -17,21 +17,14 @@ export default function LoginPage() {
   setLoading(true)
   setError('')
 
-  
-
   const { data, error } = await supabase.auth.signInWithPassword({ email, password })
-if (error) { setError(error.message); setLoading(false); return }
-
-// wait for session to propagate
-await new Promise(resolve => setTimeout(resolve, 500))
+  if (error) { setError(error.message); setLoading(false); return }
 
   const { data: profile, error: profileError } = await supabase
-  .from('profiles')
-  .select('role')
-  .eq('id', data.user.id)
-  .single()
-
-console.log('profile:', profile, 'error:', profileError) // add this
+    .from('profiles')
+    .select('role')
+    .eq('id', data.user.id)
+    .single()
 
   if (profileError || !profile) {
     setError('Account found but no profile exists. Contact your administrator.')
@@ -39,14 +32,16 @@ console.log('profile:', profile, 'error:', profileError) // add this
     return
   }
 
-  if (profile.role === 'teacher') router.push('/teacher')
-  else if (profile.role === 'student') router.push('/student')
+  // Refresh the router first so middleware picks up the new session cookie
+  router.refresh()
+
+  if (profile.role === 'teacher') router.replace('/teacher')
+  else if (profile.role === 'student') router.replace('/student')
   else {
     setError(`Unknown role "${profile.role}". Contact your administrator.`)
     setLoading(false)
   }
 }
-
   return (
     <>
       <style>{`
